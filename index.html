@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>2D Платформер · мобильный</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            background: #1a1e2c;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100dvh;
+            font-family: system-ui, -apple-system, sans-serif;
+            touch-action: pan-y; 
+        }
+        .game-wrapper {
+            background: #0b0d17;
+            border-radius: 36px;
+            padding: 12px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.7);
+            max-width: 420px;
+            width: 100%;
+            margin: 12px;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            aspect-ratio: 360 / 640;
+            background: #86b3d1;
+            border-radius: 24px;
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+            touch-action: none;
+            cursor: pointer;
+        }
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 16px;
+            padding: 0 6px;
+            gap: 12px;
+        }
+        .ctrl-btn {
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 60px;
+            color: white;
+            font-weight: 600;
+            font-size: 1.4rem;
+            padding: 14px 0;
+            text-align: center;
+            flex: 1;
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+            transition: all 0.08s ease;
+            touch-action: manipulation;
+            letter-spacing: 1px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            min-height: 64px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .ctrl-btn:active {
+            background: rgba(255, 255, 255, 0.45);
+            transform: scale(0.94);
+        }
+        .ctrl-btn.left {
+            border-radius: 60px 20px 20px 60px;
+            background: rgba(255, 215, 100, 0.25);
+            border-color: rgba(255, 215, 100, 0.4);
+        }
+        .ctrl-btn.right {
+            border-radius: 20px 60px 60px 20px;
+            background: rgba(100, 200, 255, 0.25);
+            border-color: rgba(100, 200, 255, 0.4);
+        }
+        .ctrl-btn.jump {
+            background: rgba(255, 120, 120, 0.3);
+            border-color: rgba(255, 120, 120, 0.5);
+            border-radius: 60px;
+            flex: 0.8;
+            font-size: 1.6rem;
+        }
+        .ctrl-btn.reset {
+            background: rgba(200, 200, 200, 0.15);
+            border-color: rgba(255, 255, 255, 0.2);
+            flex: 0.5;
+            font-size: 1.2rem;
+            border-radius: 40px;
+            backdrop-filter: blur(2px);
+        }
+        .ctrl-btn span {
+            opacity: 0.9;
+            pointer-events: none;
+        }
+        @media (max-width: 480px) {
+            .ctrl-btn {
+                font-size: 1.2rem;
+                min-height: 56px;
+                padding: 10px 0;
+            }
+            .ctrl-btn.jump {
+                font-size: 1.4rem;
+            }
+        }
+        /* подпись для отладки, не мешает */
+        .status-tip {
+            text-align: center;
+            color: rgba(255,255,255,0.2);
+            font-size: 0.7rem;
+            margin-top: 8px;
+            letter-spacing: 0.5px;
+        }
+    </style>
+</head>
+<body>
+<div class="game-wrapper">
+    <canvas id="gameCanvas" width="360" height="640"></canvas>
+    
+    <div class="controls">
+        <button class="ctrl-btn left" id="btnLeft"><span>◀</span></button>
+        <button class="ctrl-btn reset" id="btnReset"><span>⟳</span></button>
+        <button class="ctrl-btn right" id="btnRight"><span>▶</span></button>
+        <button class="ctrl-btn jump" id="btnJump"><span>⬆ ПРЫГ</span></button>
+    </div>
+    <div class="status-tip">полупрозрачные кнопки · платформер</div>
+</div>
+
+<script>
+    (function(){
+        // -----  ИНИЦИАЛИЗАЦИЯ -----
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Размеры (фиксированные под мобильный экран)
+        const W = 360, H = 640;
+        canvas.width = W;
+        canvas.height = H;
+
+        // -----  ИГРОВЫЕ ПАРАМЕТРЫ -----
+        const GRAVITY = 0.5;
+        const JUMP_FORCE = -10;
+        const MOVE_SPEED = 4.5;
+        const FRICTION = 0.85;
+
+        // -----  ОБЪЕКТ ИГРОКА -----
+        const player = {
+            x: 60, y: 460,
+            w: 26, h: 32,
+            vx: 0, vy: 0,
+            onGround: false,
+            facing: 1 // 1 - право, -1 - лево
+        };
+
+        // -----  ПЛАТФОРМЫ (массив) -----
+        const platforms = [
+            // земля (пол)
+            { x: 0, y: 580, w: 360, h: 30 },
+            // платформы
+            { x: 40, y: 490, w: 70, h: 16 },
+            { x: 160, y: 420, w: 70, h: 16 },
+            { x: 280, y: 350, w: 60, h: 16 },
+            { x: 100, y: 290, w: 70, h: 16 },
+            { x: 230, y: 220, w: 70, h: 16 },
+            { x: 20, y: 160, w: 60, h: 16 },
+            // правый выступ
+            { x: 300, y: 530, w: 50, h: 16 },
+        ];
+
+        // -----  ФЛАГИ УПРАВЛЕНИЯ (кнопки) -----
+        const keys = {
+            left: false,
+            right: false,
+            jump: false,
+            jumpPressed: false // для однократного прыжка
+        };
+
+        // -----  ОБРАБОТЧИКИ КНОПОК (мобильные + ПК для удобства) -----
+        function setupButton(id, onStart, onEnd) {
+            const el = document.getElementById(id);
+            if (!el) return;
+
+            // Touch
+            el.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                onStart();
+            }, { passive: false });
+            el.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                onEnd();
+            }, { passive: false });
+            el.addEventListener('touchcancel', (e) => {
+                e.preventDefault();
+                onEnd();
+            }, { passive: false });
+
+            // Mouse (для десктоп-тестирования)
+            el.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                onStart();
+            });
+            el.addEventListener('mouseup', (e) => {
+                e.preventDefault();
+                onEnd();
+            });
+            el.addEventListener('mouseleave', (e) => {
+                // если мышь ушла за кнопку — отключаем
+                onEnd();
+            });
+        }
+
+        // Назначение кнопок
+        setupButton('btnLeft', 
+            () => { keys.left = true; },
+            () => { keys.left = false; }
+        );
+        setupButton('btnRight',
+            () => { keys.right = true; },
+            () => { keys.right = false; }
+        );
+        setupButton('btnJump',
+            () => { 
+                keys.jump = true; 
+                keys.jumpPressed = true; 
+            },
+            () => { 
+                keys.jump = false; 
+                // не сбрасываем jumpPressed сразу, чтобы дать прыжок
+            }
+        );
+        // Кнопка сброса (рестарт)
+        document.getElementById('btnReset').addEventListener('click', (e) => {
+            e.preventDefault();
+            resetGame();
+        });
+        // также обработаем touch на reset
+        document.getElementById('btnReset').addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            resetGame();
+        }, { passive: false });
+
+        // -----  СБРОС ИГРЫ -----
+        function resetGame() {
+            player.x = 60;
+            player.y = 460;
+            player.vx = 0;
+            player.vy = 0;
+            player.onGround = false;
+            keys.left = false;
+            keys.right = false;
+            keys.jump = false;
+            keys.jumpPressed = false;
+        }
+
+        // -----  КОЛЛИЗИЯ С ПЛАТФОРМАМИ -----
+        function handleCollisions() {
+            player.onGround = false;
+
+            for (let pl of platforms) {
+                // Прямоугольники
+                const px = player.x, py = player.y, pw = player.w, ph = player.h;
+                const plx = pl.x, ply = pl.y, plw = pl.w, plh = pl.h;
+
+                // Пересечение по осям
+                if (px < plx + plw && px + pw > plx &&
+                    py < ply + plh && py + ph > ply) {
+                    
+                    // Глубина пересечения по X и Y
+                    const overlapX = Math.min(px + pw - plx, plx + plw - px);
+                    const overlapY = Math.min(py + ph - ply, ply + plh - py);
+
+                    if (overlapX < overlapY) {
+                        // Смещение по X
+                        if (px < plx) {
+                            player.x = plx - pw;
+                        } else {
+                            player.x = plx + plw;
+                        }
+                        player.vx = 0;
+                    } else {
+                        // Смещение по Y
+                        if (py < ply) {
+                            // приземление сверху
+                            player.y = ply - ph;
+                            player.vy = 0;
+                            player.onGround = true;
+                        } else {
+                            // снизу (удар головой)
+                            player.y = ply + plh;
+                            player.vy = 0;
+                        }
+                    }
+                }
+            }
+
+            // Границы мира (левая/правая/низ)
+            if (player.x < 0) { player.x = 0; player.vx = 0; }
+            if (player.x + player.w > W) { player.x = W - player.w; player.vx = 0; }
+            if (player.y + player.h > H) {
+                player.y = H - player.h;
+                player.vy = 0;
+                player.onGround = true;
+            }
+            if (player.y < 0) { player.y = 0; player.vy = 0; }
+        }
+
+        // -----  ОБНОВЛЕНИЕ ФИЗИКИ -----
+        function update() {
+            // Горизонтальное движение
+            if (keys.left) {
+                player.vx = -MOVE_SPEED;
+                player.facing = -1;
+            } else if (keys.right) {
+                player.vx = MOVE_SPEED;
+                player.facing = 1;
+            } else {
+                player.vx *= FRICTION;
+                if (Math.abs(player.vx) < 0.1) player.vx = 0;
+            }
+
+            // Прыжок (однократный)
+            if (keys.jumpPressed && player.onGround) {
+                player.vy = JUMP_FORCE;
+                player.onGround = false;
+                keys.jumpPressed = false; // сбрасываем, чтобы не спамить
+            }
+            // если кнопка прыжка всё ещё зажата, но игрок уже в воздухе — не даём повторно прыгнуть
+            if (!player.onGround) {
+                // сбрасываем флаг, чтобы нельзя было прыгнуть в воздухе
+                // но если кнопка была отпущена и нажата снова — jumpPressed станет true только при новом нажатии
+                // у нас jumpPressed сбрасывается в обработчике touchend? нет, мы сбрасываем только после прыжка.
+                // но если кнопка зажата, а игрок в воздухе, jumpPressed остаётся true, 
+                // но мы не даём прыгнуть повторно, т.к. проверяем player.onGround
+                // поэтому дополнительно сбросим jumpPressed, если игрок в воздухе и кнопка зажата, 
+                // чтобы после приземления не произошёл автоматический прыжок.
+                if (keys.jump) {
+                    // если кнопка зажата в воздухе — сбрасываем флаг, чтобы не было прыжка сразу после приземления
+                    // но нам нужно, чтобы если пользователь отпустит и нажмёт снова — сработало.
+                    // Лучше: jumpPressed = false, когда кнопка отпущена.
+                    // уже реализовано: в touchend мы не сбрасываем jumpPressed, но мы сбросим его при прыжке.
+                    // но если кнопка зажата и игрок приземлился, то прыжок произойдёт мгновенно — нехорошо.
+                    // Поэтому: jumpPressed сбрасывается при прыжке, и также сбрасывается, если игрок в воздухе и кнопка зажата.
+                    // Но тогда при зажатой кнопке и приземлении прыжка не будет, пока не отпустить и нажать снова.
+                    // Сделаем так: если игрок в воздухе и кнопка jump зажата, то jumpPressed = false.
+                    // Это позволит избежать "автопрыжка" при приземлении.
+                    if (!player.onGround) {
+                        keys.jumpPressed = false;
+                    }
+                }
+            }
+
+            // Применяем гравитацию
+            player.vy += GRAVITY;
+            if (player.vy > 12) player.vy = 12;
+
+            // Перемещение
+            player.x += player.vx;
+            player.y += player.vy;
+
+            // Коллизии
+            handleCollisions();
+
+            // Если игрок упал в бездну (ниже экрана) — респавн
+            if (player.y > H + 60) {
+                resetGame();
+            }
+
+            // Сбрасываем jumpPressed, если кнопка отпущена (дополнительная защита)
+            // но мы уже сбрасываем в touchend, а здесь просто гарантируем
+            if (!keys.jump) {
+                keys.jumpPressed = false;
+            }
+        }
+
+        // -----  ОТРИСОВКА -----
+        function draw() {
+            ctx.clearRect(0, 0, W, H);
+
+            // Небо (градиент)
+            const grad = ctx.createLinearGradient(0, 0, 0, H);
+            grad.addColorStop(0, '#89c2e8');
+            grad.addColorStop(0.7, '#b4d9f0');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, W, H);
+
+            // Солнышко
+            ctx.beginPath();
+            ctx.arc(300, 60, 30, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 230, 130, 0.6)';
+            ctx.shadowColor = '#ffdd77';
+            ctx.shadowBlur = 40;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+
+            // Платформы
+            for (let pl of platforms) {
+                // тень
+                ctx.shadowColor = 'rgba(0,0,0,0.2)';
+                ctx.shadowBlur = 8;
+                ctx.fillStyle = '#5d7a5c';
+                ctx.beginPath();
+                ctx.roundRect(pl.x, pl.y, pl.w, pl.h, 6);
+                ctx.fill();
+
+                // блик
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = '#7fa07c';
+                ctx.beginPath();
+                ctx.roundRect(pl.x+2, pl.y-2, pl.w-4, 6, 4);
+                ctx.fill();
+                
+                // тёмная окантовка
+                ctx.fillStyle = '#3d543c';
+                ctx.beginPath();
+                ctx.roundRect(pl.x, pl.y+pl.h-4, pl.w, 4, 2);
+                ctx.fill();
+            }
+
+            // Игрок (с учетом направления)
+            const px = player.x, py = player.y;
+            // тело
+            ctx.shadowColor = 'rgba(0,0,0,0.3)';
+            ctx.shadowBlur = 12;
+            // градиент для игрока
+            const grd = ctx.createLinearGradient(px, py, px+player.w, py+player.h);
+            grd.addColorStop(0, '#f9d56e');
+            grd.addColorStop(0.5, '#f5b342');
+            grd.addColorStop(1, '#d48c2c');
+            ctx.fillStyle = grd;
+            ctx.beginPath();
+            ctx.roundRect(px, py, player.w, player.h, 8);
+            ctx.fill();
+
+            // глаза
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = '#1e2a3a';
+            const eyeOffsetX = (player.facing === 1) ? 16 : 6;
+            ctx.beginPath();
+            ctx.arc(px + eyeOffsetX, py + 10, 4, 0, Math.PI*2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(px + eyeOffsetX + 6, py + 10, 3.5, 0, Math.PI*2);
+            ctx.fill();
+
+            // зрачки (белые)
+            ctx.fillStyle = '#f0f4ff';
+            ctx.beginPath();
+            ctx.arc(px + eyeOffsetX + 1, py + 8, 1.5, 0, Math.PI*2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(px + eyeOffsetX + 7, py + 8, 1.5, 0, Math.PI*2);
+            ctx.fill();
+
+            // рот (улыбка)
+            ctx.strokeStyle = '#3d2817';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(px + player.w/2, py + 18, 7, 0.1, Math.PI - 0.1);
+            ctx.stroke();
+
+            // полоски на одежде
+            ctx.fillStyle = '#c97d2b';
+            ctx.fillRect(px+4, py+22, 4, 4);
+            ctx.fillRect(px+player.w-8, py+22, 4, 4);
+
+            // Сброс тени
+            ctx.shadowBlur = 0;
+        }
+
+        // Добавляем roundRect если отсутствует
+        if (!CanvasRenderingContext2D.prototype.roundRect) {
+            CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+                if (r > w/2) r = w/2;
+                if (r > h/2) r = h/2;
+                this.moveTo(x + r, y);
+                this.lineTo(x + w - r, y);
+                this.quadraticCurveTo(x + w, y, x + w, y + r);
+                this.lineTo(x + w, y + h - r);
+                this.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+                this.lineTo(x + r, y + h);
+                this.quadraticCurveTo(x, y + h, x, y + h - r);
+                this.lineTo(x, y + r);
+                this.quadraticCurveTo(x, y, x + r, y);
+                return this;
+            };
+        }
+
+        // -----  ИГРОВОЙ ЦИКЛ -----
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Запуск
+        gameLoop();
+
+        // Блокировка контекстного меню на canvas
+        canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+        // также предотвращаем скролл при касаниях
+        document.addEventListener('touchmove', (e) => {
+            if (e.target.closest('.game-wrapper')) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+
+    })();
+</script>
+</body>
+</html>
